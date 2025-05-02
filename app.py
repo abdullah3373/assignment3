@@ -1,187 +1,258 @@
-# EduInsights - Student Performance Prediction Streamlit App
-# All-in-one file with CSV upload, preprocessing, ML modeling, evaluation, and enhanced visuals
+# AF3005 Assignment 3: Financial ML App with Streamlit
+# Complete implementation with Yahoo Finance, Kragle upload, and required workflow
 
 import streamlit as st
-from streamlit_option_menu import option_menu
 import pandas as pd
 import numpy as np
+import yfinance as yf
+from datetime import datetime
 import plotly.express as px
+from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder, StandardScaler
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
-import seaborn as sns
-import matplotlib.pyplot as plt
-import io
-import requests
+from sklearn.linear_model import LinearRegression, LogisticRegression
+from sklearn.cluster import KMeans
+from sklearn.metrics import (
+    mean_squared_error, r2_score, accuracy_score, 
+    confusion_matrix, silhouette_score
+)
+import base64
 
-# Page setup
-st.set_page_config(page_title="EduInsights", layout="wide", initial_sidebar_state="expanded")
+# Page configuration
+st.set_page_config(
+    page_title="FinML Dashboard",
+    page_icon="💹",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# Neon theme styling
+# Custom theme and animations
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap');
-* { font-family: 'VT323', monospace; }
-.main { background: #000000; color: white; }
-h1, h2, h3, h4 { color: #00ffff; text-shadow: 0 0 10px #00ffff; font-family: 'Press Start 2P'; }
-.stButton>button, .stDownloadButton>button {
-    background: black; color: #00ff00; border: 2px solid #00ff00;
-    font-family: 'Press Start 2P'; text-transform: uppercase;
-    transition: 0.3s ease; animation: pulse 2s infinite;
+@import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@300;500&display=swap');
+* {font-family: 'Roboto Mono', monospace;}
+.stApp {background: #0F0F23; color: #00FF9D;}
+h1, h2, h3 {color: #00D1FF; border-bottom: 2px solid #FF00E5;}
+.stButton>button {
+    background: #1A1A2F !important;
+    color: #00FF9D !important;
+    border: 2px solid #00FF9D !important;
+    border-radius: 5px;
+    transition: 0.3s;
 }
-@keyframes pulse {
-  0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); }
-}
+.stButton>button:hover {transform: scale(1.05);}
+.success {color: #00FF00 !important;}
+.warning {color: #FFA500 !important;}
 </style>
 """, unsafe_allow_html=True)
 
-# Sidebar navigation
+# Session state initialization
+if 'current_step' not in st.session_state:
+    st.session_state.current_step = 1
+if 'df' not in st.session_state:
+    st.session_state.df = None
+if 'model' not in st.session_state:
+    st.session_state.model = None
+
+# Helper functions
+def add_gif(url, width=300):
+    st.markdown(f'<img src="{url}" width="{width}">', unsafe_allow_html=True)
+
+def progress_step():
+    st.session_state.current_step += 1
+
+# Sidebar - Data Loading
 with st.sidebar:
-    selected = option_menu(
-        menu_title="EduInsights 📚",
-        options=["Home", "Upload/Fetch Data", "Visualize", "Preprocessing", "Modeling", "Evaluation", "Download"],
-        icons=["house", "cloud-upload", "bar-chart", "gear", "robot", "activity", "download"],
-        default_index=0
-    )
+    st.header("📈 Data Configuration")
+    data_source = st.radio("Select Data Source:", 
+                          ["Upload Kragle Dataset", "Yahoo Finance"])
+    
+    if data_source == "Yahoo Finance":
+        ticker = st.text_input("Stock Ticker (e.g., AAPL):", "AAPL")
+        start_date = st.date_input("Start Date:", datetime(2020, 1, 1))
+        end_date = st.date_input("End Date:", datetime.today())
+        
+        if st.button("Fetch Market Data"):
+            with st.spinner("Downloading financial data..."):
+                try:
+                    df = yf.download(ticker, start=start_date, end=end_date)
+                    df = df.reset_index()
+                    df['Daily Return'] = df['Close'].pct_change()
+                    st.session_state.df = df.dropna()
+                    st.success("Yahoo Finance data loaded!")
+                    st.session_state.current_step = 2
+                except Exception as e:
+                    st.error(f"Error fetching data: {str(e)}")
+    
+    elif data_source == "Upload Kragle Dataset":
+        uploaded_file = st.file_uploader("Upload CSV File", type=["csv"])
+        if uploaded_file and st.button("Process Kragle Data"):
+            st.session_state.df = pd.read_csv(uploaded_file)
+            st.success("Kragle dataset loaded!")
+            st.session_state.current_step = 2
 
-# Session storage
-for key in ["df", "X_train", "X_test", "y_train", "y_test", "model", "y_pred"]:
-    if key not in st.session_state:
-        st.session_state[key] = None
+# Main workflow steps
+st.title("💻 Financial Machine Learning Workflow")
+add_gif("https://i.giphy.com/media/3o7btPCcdNniyf0ArS/giphy.webp", 400)
 
-# Home page
-if selected == "Home":
-    st.title("📚 EduInsights")
-    st.markdown("""
-    <h2 style='color:#ff00ff;'>Predict Student Academic Performance</h2>
-    <p>Analyze student data, visualize insights, and build predictive models – all in one neon-themed app! 🌟</p>
-    """, unsafe_allow_html=True)
-
-# Upload or Fetch data
-elif selected == "Upload/Fetch Data":
-    st.header("📂 Upload or Fetch Student Data")
-    option = st.radio("Choose Data Source:", ["Upload CSV", "Fetch Demo Dataset"])
-
-    if option == "Upload CSV":
-        file = st.file_uploader("Upload a CSV file", type=["csv"])
-        if file:
-            st.session_state.df = pd.read_csv(file)
-            st.success("Data uploaded successfully!")
-    else:
-        st.info("Fetching student performance dataset from UCI repo...")
-        url = "https://raw.githubusercontent.com/selva86/datasets/master/StudentPerformance.csv"
-        content = requests.get(url).content
-        st.session_state.df = pd.read_csv(io.StringIO(content.decode("utf-8")))
-        st.success("Demo data loaded!")
-
+# Step 1: Data Preview
+if st.session_state.current_step >= 1:
+    st.header("1. Data Overview")
     if st.session_state.df is not None:
         st.dataframe(st.session_state.df.head())
-
-# Visualize data
-elif selected == "Visualize":
-    st.header("📊 Data Visualizations")
-    df = st.session_state.df
-    if df is None:
-        st.warning("Please upload or fetch a dataset first.")
+        st.plotly_chart(px.line(st.session_state.df, x='Date', y='Close', 
+                              title='Stock Price Movement', template='plotly_dark'))
     else:
-        st.subheader("Grade Distribution")
-        if 'G3' in df.columns:
-            fig1 = px.histogram(df, x='G3', nbins=20, title='Final Grade Distribution', template='plotly_dark')
-            st.plotly_chart(fig1)
+        st.warning("Please load data first using the sidebar controls")
 
-        st.subheader("Gender vs Performance")
-        if 'sex' in df.columns and 'G3' in df.columns:
-            fig2 = px.box(df, x='sex', y='G3', color='sex', title='Gender vs Final Grade', template='plotly_dark')
-            st.plotly_chart(fig2)
-
-        st.subheader("Correlation Heatmap")
-        num_df = df.select_dtypes(include=np.number)
-        if len(num_df.columns) > 1:
-            fig3 = px.imshow(num_df.corr(), text_auto=True, title='Numeric Feature Correlation', template='plotly_dark')
-            st.plotly_chart(fig3)
-
-# Preprocessing
-elif selected == "Preprocessing":
-    st.header("⚙️ Preprocessing")
-    df = st.session_state.df
-    if df is None:
-        st.warning("Upload or fetch data first.")
-    else:
+# Step 2: Preprocessing
+if st.session_state.current_step >= 2:
+    st.header("2. Data Preprocessing")
+    if st.button("Run Data Preprocessing"):
+        df = st.session_state.df.copy()
+        
+        # Handle missing values
         if df.isnull().sum().sum() > 0:
-            st.write("Filling missing values with mean...")
-            df.fillna(df.mean(numeric_only=True), inplace=True)
+            df = df.dropna()
+            st.success(f"Removed {len(st.session_state.df) - len(df)} rows with missing values")
+        
+        # Feature engineering
+        df['MA_7'] = df['Close'].rolling(window=7).mean()
+        df['MA_30'] = df['Close'].rolling(window=30).mean()
+        df['Volatility'] = df['Daily Return'].rolling(30).std()
+        
+        st.session_state.df = df.dropna()
+        progress_step()
+        st.success("Preprocessing complete! Added technical indicators")
 
-        cat_cols = df.select_dtypes(include='object').columns
-        for col in cat_cols:
-            df[col] = LabelEncoder().fit_transform(df[col])
+# Step 3: Feature Selection
+if st.session_state.current_step >= 3:
+    st.header("3. Feature Engineering")
+    if st.session_state.df is not None:
+        df = st.session_state.df
+        numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
+        
+        selected_features = st.multiselect("Select Features for Modeling",
+                                         numeric_cols,
+                                         default=numeric_cols[:-1])
+        target_var = st.selectbox("Select Target Variable", numeric_cols)
+        
+        if st.button("Confirm Features"):
+            st.session_state.X = df[selected_features]
+            st.session_state.y = df[target_var]
+            progress_step()
+            st.success("Features configured!")
 
-        st.session_state.df = df
-        st.success("Preprocessing complete.")
-        st.dataframe(df.head())
-
-# Modeling
-elif selected == "Modeling":
-    st.header("🤖 Model Training")
-    df = st.session_state.df
-    if df is None:
-        st.warning("Preprocess data first.")
+# Step 4: Model Training
+if st.session_state.current_step >= 4:
+    st.header("4. Model Configuration")
+    model_type = st.selectbox("Select ML Model",
+                             ["Linear Regression", "Logistic Regression", "K-Means Clustering"])
+    
+    if model_type == "Linear Regression":
+        model = LinearRegression()
+    elif model_type == "Logistic Regression":
+        model = LogisticRegression(max_iter=1000)
     else:
-        target = st.selectbox("Select Target Column", df.columns, index=-1)
-        features = st.multiselect("Select Feature Columns", [col for col in df.columns if col != target], default=[col for col in df.columns if col != target])
-
-        if features:
-            X = df[features]
-            y = df[target]
-            X = StandardScaler().fit_transform(X)
-            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-            model_type = st.selectbox("Select Model", ["Random Forest", "Logistic Regression"])
-            if model_type == "Random Forest":
-                model = RandomForestClassifier(n_estimators=100, random_state=42)
-            else:
-                model = LogisticRegression(max_iter=1000)
-
+        n_clusters = st.slider("Number of Clusters", 2, 10, 3)
+        model = KMeans(n_clusters=n_clusters)
+    
+    test_size = st.slider("Test Size Ratio", 0.1, 0.5, 0.2)
+    
+    if st.button("Train Model"):
+        X = StandardScaler().fit_transform(st.session_state.X)
+        y = st.session_state.y
+        
+        if model_type != "K-Means Clustering":
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=test_size, random_state=42
+            )
             model.fit(X_train, y_train)
             y_pred = model.predict(X_test)
+        else:
+            model.fit(X)
+            y_pred = model.predict(X)
+        
+        st.session_state.model = model
+        st.session_state.y_pred = y_pred
+        if model_type != "K-Means Clustering":
+            st.session_state.X_test = X_test
+            st.session_state.y_test = y_test
+        
+        progress_step()
+        st.success(f"{model_type} training complete!")
 
-            st.session_state.update({
-                "X_train": X_train, "X_test": X_test,
-                "y_train": y_train, "y_test": y_test,
-                "model": model, "y_pred": y_pred
+# Step 5: Results & Evaluation
+if st.session_state.current_step >= 5:
+    st.header("5. Model Evaluation")
+    if st.session_state.model is not None:
+        model = st.session_state.model
+        model_type = type(model).__name__
+        
+        if model_type == "LinearRegression":
+            st.subheader("Regression Metrics")
+            rmse = np.sqrt(mean_squared_error(st.session_state.y_test, st.session_state.y_pred))
+            r2 = r2_score(st.session_state.y_test, st.session_state.y_pred)
+            
+            col1, col2 = st.columns(2)
+            col1.metric("RMSE", f"{rmse:.4f}")
+            col2.metric("R² Score", f"{r2:.4f}")
+            
+            fig = px.scatter(x=st.session_state.y_test, y=st.session_state.y_pred,
+                            labels={'x': 'Actual', 'y': 'Predicted'},
+                            title="Actual vs Predicted Values")
+            st.plotly_chart(fig)
+        
+        elif model_type == "LogisticRegression":
+            st.subheader("Classification Metrics")
+            acc = accuracy_score(st.session_state.y_test, st.session_state.y_pred)
+            cm = confusion_matrix(st.session_state.y_test, st.session_state.y_pred)
+            
+            st.metric("Accuracy", f"{acc:.2%}")
+            fig = px.imshow(cm, text_auto=True, 
+                           labels=dict(x="Predicted", y="Actual"),
+                           title="Confusion Matrix")
+            st.plotly_chart(fig)
+        
+        elif model_type == "KMeans":
+            st.subheader("Clustering Results")
+            silhouette = silhouette_score(st.session_state.X, st.session_state.y_pred)
+            st.metric("Silhouette Score", f"{silhouette:.2f}")
+            
+            fig = px.scatter_3d(st.session_state.X,
+                               x=st.session_state.X[:,0],
+                               y=st.session_state.X[:,1],
+                               z=st.session_state.X[:,2],
+                               color=st.session_state.y_pred,
+                               title="Cluster Visualization")
+            st.plotly_chart(fig)
+
+# Bonus Features
+st.sidebar.markdown("---")
+st.sidebar.header("Bonus Features")
+if st.session_state.df is not None:
+    st.sidebar.download_button("Download Processed Data",
+                              st.session_state.df.to_csv(index=False),
+                              "processed_financial_data.csv",
+                              "text/csv")
+
+if st.session_state.model is not None:
+    st.sidebar.markdown("### Model Coefficients")
+    try:
+        if hasattr(st.session_state.model, 'coef_'):
+            coefs = pd.DataFrame({
+                'Feature': st.session_state.X.columns,
+                'Importance': st.session_state.model.coef_[0]
             })
-            st.success(f"{model_type} model trained.")
+            st.sidebar.dataframe(coefs.sort_values('Importance', ascending=False))
+    except Exception as e:
+        st.sidebar.warning("Coefficients not available for this model")
 
-# Evaluation
-elif selected == "Evaluation":
-    st.header("📈 Model Evaluation")
-    y_test = st.session_state.y_test
-    y_pred = st.session_state.y_pred
-
-    if y_test is None or y_pred is None:
-        st.warning("Please train a model first.")
-    else:
-        acc = accuracy_score(y_test, y_pred)
-        prec = precision_score(y_test, y_pred, average='weighted')
-        rec = recall_score(y_test, y_pred, average='weighted')
-        f1 = f1_score(y_test, y_pred, average='weighted')
-
-        st.metric("Accuracy", f"{acc:.2f}")
-        st.metric("Precision", f"{prec:.2f}")
-        st.metric("Recall", f"{rec:.2f}")
-        st.metric("F1 Score", f"{f1:.2f}")
-
-        cm = confusion_matrix(y_test, y_pred)
-        st.subheader("Confusion Matrix")
-        fig = px.imshow(cm, text_auto=True, title='Confusion Matrix', labels=dict(x="Predicted", y="Actual"), template='plotly_dark')
-        st.plotly_chart(fig)
-
-# Download
-elif selected == "Download":
-    st.header("⬇️ Download Results")
-    if st.session_state.y_pred is not None:
-        df_out = pd.DataFrame({"Actual": st.session_state.y_test, "Predicted": st.session_state.y_pred})
-        st.download_button("Download Predictions", df_out.to_csv(index=False), "eduinsights_predictions.csv", "text/csv")
-    else:
-        st.warning("No predictions to download yet.")
+# How to Run instructions
+st.sidebar.markdown("---")
+st.sidebar.info("""
+**How to Run:**
+1. Select data source in sidebar
+2. Complete steps sequentially
+3. Each step unlocks next
+4. Visualizations update automatically
+""")
