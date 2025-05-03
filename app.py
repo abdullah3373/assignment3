@@ -1,5 +1,14 @@
-# AF3005 Assignment 3: Financial ML App with Streamlit
-# Complete implementation with Yahoo Finance, Kragle upload, and required workflow
+"""
+AF3005 Assignment 3: Financial ML Dashboard
+Instructor: Dr. Usama Arshad
+BS Financial Technology - Spring 2025
+
+How to Run:
+1. pip install -r requirements.txt
+2. streamlit run finml_app.py
+3. Use sidebar to load data (Kragle CSV/Yahoo Finance)
+4. Follow step-by-step workflow using buttons
+"""
 
 import streamlit as st
 import pandas as pd
@@ -17,7 +26,9 @@ from sklearn.metrics import (
 )
 import base64
 
-# Page configuration
+# ======================
+# PAGE CONFIGURATION
+# ======================
 st.set_page_config(
     page_title="FinML Dashboard",
     page_icon="💹",
@@ -25,7 +36,9 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom theme and animations
+# ======================
+# CUSTOM THEME
+# ======================
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@300;500&display=swap');
@@ -45,7 +58,9 @@ h1, h2, h3 {color: #00D1FF; border-bottom: 2px solid #FF00E5;}
 </style>
 """, unsafe_allow_html=True)
 
-# Session state initialization
+# ======================
+# SESSION STATE
+# ======================
 if 'current_step' not in st.session_state:
     st.session_state.current_step = 1
 if 'df' not in st.session_state:
@@ -53,14 +68,18 @@ if 'df' not in st.session_state:
 if 'model' not in st.session_state:
     st.session_state.model = None
 
-# Helper functions
+# ======================
+# HELPER FUNCTIONS
+# ======================
 def add_gif(url, width=300):
     st.markdown(f'<img src="{url}" width="{width}">', unsafe_allow_html=True)
 
 def progress_step():
     st.session_state.current_step += 1
 
-# Sidebar - Data Loading
+# ======================
+# SIDEBAR - DATA LOADING
+# ======================
 with st.sidebar:
     st.header("📈 Data Configuration")
     data_source = st.radio("Select Data Source:", 
@@ -86,25 +105,40 @@ with st.sidebar:
     elif data_source == "Upload Kragle Dataset":
         uploaded_file = st.file_uploader("Upload CSV File", type=["csv"])
         if uploaded_file and st.button("Process Kragle Data"):
-            st.session_state.df = pd.read_csv(uploaded_file)
-            st.success("Kragle dataset loaded!")
-            st.session_state.current_step = 2
+            try:
+                st.session_state.df = pd.read_csv(uploaded_file)
+                st.success("Kragle dataset loaded!")
+                st.session_state.current_step = 2
+            except Exception as e:
+                st.error(f"Error reading CSV: {str(e)}")
 
-# Main workflow steps
+# ======================
+# MAIN WORKFLOW
+# ======================
 st.title("💻 Financial Machine Learning Workflow")
 add_gif("https://i.giphy.com/media/3o7btPCcdNniyf0ArS/giphy.webp", 400)
 
-# Step 1: Data Preview
+# ======================
+# STEP 1: DATA OVERVIEW
+# ======================
 if st.session_state.current_step >= 1:
     st.header("1. Data Overview")
     if st.session_state.df is not None:
+        st.subheader("Raw Data Preview")
         st.dataframe(st.session_state.df.head())
-        st.plotly_chart(px.line(st.session_state.df, x='Date', y='Close', 
-                              title='Stock Price Movement', template='plotly_dark'))
+        
+        st.subheader("Price Movement")
+        fig = px.line(st.session_state.df, x='Date', y='Close', 
+                     title='Stock Price Movement', 
+                     template='plotly_dark',
+                     color_discrete_sequence=['#00FF9D'])
+        st.plotly_chart(fig)
     else:
         st.warning("Please load data first using the sidebar controls")
 
-# Step 2: Preprocessing
+# ======================
+# STEP 2: PREPROCESSING
+# ======================
 if st.session_state.current_step >= 2:
     st.header("2. Data Preprocessing")
     if st.button("Run Data Preprocessing"):
@@ -112,8 +146,9 @@ if st.session_state.current_step >= 2:
         
         # Handle missing values
         if df.isnull().sum().sum() > 0:
+            initial_rows = len(df)
             df = df.dropna()
-            st.success(f"Removed {len(st.session_state.df) - len(df)} rows with missing values")
+            st.success(f"Removed {initial_rows - len(df)} rows with missing values")
         
         # Feature engineering
         df['MA_7'] = df['Close'].rolling(window=7).mean()
@@ -123,8 +158,13 @@ if st.session_state.current_step >= 2:
         st.session_state.df = df.dropna()
         progress_step()
         st.success("Preprocessing complete! Added technical indicators")
+        
+        st.subheader("Processed Data")
+        st.dataframe(st.session_state.df.tail())
 
-# Step 3: Feature Selection
+# ======================
+# STEP 3: FEATURE ENGINEERING
+# ======================
 if st.session_state.current_step >= 3:
     st.header("3. Feature Engineering")
     if st.session_state.df is not None:
@@ -142,12 +182,15 @@ if st.session_state.current_step >= 3:
             progress_step()
             st.success("Features configured!")
 
-# Step 4: Model Training
+# ======================
+# STEP 4: MODEL TRAINING
+# ======================
 if st.session_state.current_step >= 4:
     st.header("4. Model Configuration")
     model_type = st.selectbox("Select ML Model",
                              ["Linear Regression", "Logistic Regression", "K-Means Clustering"])
     
+    # Model parameters
     if model_type == "Linear Regression":
         model = LinearRegression()
     elif model_type == "Logistic Regression":
@@ -168,6 +211,18 @@ if st.session_state.current_step >= 4:
             )
             model.fit(X_train, y_train)
             y_pred = model.predict(X_test)
+            
+            # Show train-test split
+            st.subheader("Data Split Ratio")
+            split_df = pd.DataFrame({
+                'Set': ['Training', 'Testing'],
+                'Samples': [len(y_train), len(y_test)]
+            })
+            fig_split = px.pie(split_df, names='Set', values='Samples', 
+                              title='Train/Test Data Distribution',
+                              template='plotly_dark',
+                              color_discrete_sequence=px.colors.qualitative.Dark2)
+            st.plotly_chart(fig_split)
         else:
             model.fit(X)
             y_pred = model.predict(X)
@@ -181,7 +236,9 @@ if st.session_state.current_step >= 4:
         progress_step()
         st.success(f"{model_type} training complete!")
 
-# Step 5: Results & Evaluation
+# ======================
+# STEP 5: EVALUATION
+# ======================
 if st.session_state.current_step >= 5:
     st.header("5. Model Evaluation")
     if st.session_state.model is not None:
@@ -199,7 +256,9 @@ if st.session_state.current_step >= 5:
             
             fig = px.scatter(x=st.session_state.y_test, y=st.session_state.y_pred,
                             labels={'x': 'Actual', 'y': 'Predicted'},
-                            title="Actual vs Predicted Values")
+                            title="Actual vs Predicted Values",
+                            template='plotly_dark',
+                            color_discrete_sequence=['#FF00E5'])
             st.plotly_chart(fig)
         
         elif model_type == "LogisticRegression":
@@ -210,7 +269,8 @@ if st.session_state.current_step >= 5:
             st.metric("Accuracy", f"{acc:.2%}")
             fig = px.imshow(cm, text_auto=True, 
                            labels=dict(x="Predicted", y="Actual"),
-                           title="Confusion Matrix")
+                           title="Confusion Matrix",
+                           template='plotly_dark')
             st.plotly_chart(fig)
         
         elif model_type == "KMeans":
@@ -223,10 +283,13 @@ if st.session_state.current_step >= 5:
                                y=st.session_state.X[:,1],
                                z=st.session_state.X[:,2],
                                color=st.session_state.y_pred,
-                               title="Cluster Visualization")
+                               title="Cluster Visualization",
+                               template='plotly_dark')
             st.plotly_chart(fig)
 
-# Bonus Features
+# ======================
+# BONUS FEATURES
+# ======================
 st.sidebar.markdown("---")
 st.sidebar.header("Bonus Features")
 if st.session_state.df is not None:
@@ -247,10 +310,12 @@ if st.session_state.model is not None:
     except Exception as e:
         st.sidebar.warning("Coefficients not available for this model")
 
-# How to Run instructions
+# ======================
+# DOCUMENTATION
+# ======================
 st.sidebar.markdown("---")
 st.sidebar.info("""
-**How to Run:**
+**How to Use:**
 1. Select data source in sidebar
 2. Complete steps sequentially
 3. Each step unlocks next
